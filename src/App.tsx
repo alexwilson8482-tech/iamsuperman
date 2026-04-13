@@ -6,7 +6,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { NewOrderPage } from "./pages/NewOrderPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import type { ApiPanel, Bundle, CreatedOrder, RunStatus } from "./types/order";
-import { fetchServices, updateOrderControl, fetchOrderRuns } from "./utils/api";
+import { fetchServices, updateOrderControl, fetchOrderRuns, fetchAllOrdersStatus } from "./utils/api";
 import { cn } from "./utils/cn";
 
 type NavKey = "dashboard" | "new-order" | "orders" | "apis" | "bundles";
@@ -158,7 +158,6 @@ export default function App() {
   const [controllingOrderId, setControllingOrderId] = useState<string | null>(null);
   
   const [batmanQuote] = useState(() => getRandomQuote());
-  import { fetchAllOrdersStatus } from "./utils/api";
 
 useEffect(() => {
   async function loadOrders() {
@@ -201,8 +200,11 @@ useEffect(() => {
         lastUpdatedAt: order.lastUpdatedAt,
       }));
 
-      localStorage.setItem("dev-smm-orders", JSON.stringify(orders));
-      setOrders(orders);
+      setOrders(prev => {
+  localStorage.setItem("dev-smm-orders", JSON.stringify(orders));
+  return orders;
+});
+      console.log("✅ Orders loaded from backend:", orders);
 
     } catch (err) {
       console.error(err);
