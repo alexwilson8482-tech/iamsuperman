@@ -170,50 +170,139 @@ useEffect(() => {
     try {
       const data = await fetchAllOrdersStatus();
 
-      const orders = data.orders.map(order => ({
-        id: order.schedulerOrderId, 
-        name: order.name,
-        schedulerOrderId: order.schedulerOrderId,
-        smmOrderId: "N/A",
-        link: order.link,
-        totalViews: 0,
-        startDelayHours: 0,
-        patternType: "manual",
-        patternName: "Recovered",
-        runs: order.runs.map((r, i) => ({
-          run: i + 1,
-          at: new Date(r.time),
-          minutesFromStart: 0,
-          views: 0,
-          likes: 0,
-          shares: 0,
-          saves: 0,
-          comments: 0,
-          cumulativeViews: 0,
-          cumulativeLikes: 0,
-          cumulativeShares: 0,
-          cumulativeSaves: 0,
-          cumulativeComments: 0,
-        })),
-        engagement: { likes: 0, shares: 0, saves: 0, comments: 0 },
-        serviceId: "auto",
-        selectedAPI: null,
-        selectedBundle: "",
-        status: order.status,
-        completedRuns: order.completedRuns,
-        runStatuses: order.runStatuses,
-        createdAt: order.createdAt,
-        lastUpdatedAt: order.lastUpdatedAt,
-      }));
+      const backendOrders: CreatedOrder[] = data.orders.map(order => {
+        // 🔥 FIX: Group runs by TIME to combine views/likes/shares/saves/comments into single run steps
+        const runsByTime = new Map<string, {
+          time: string;
+          views: number;
+          likes: number;
+          shares: number;
+          saves: number;
+          comments: number;
+          status: string;
+        }>();
 
-      setOrders(prev => {
-  localStorage.setItem("dev-smm-orders", JSON.stringify(orders));
-  return orders;
-});
-      console.log("✅ Orders loaded from backend:", orders);
+        // 🔥 FIX: Group backend runs by time slot
+        for (const r of order.runs) {
+          const timeKey = r.time; // ISO string
+          const existing = runsByTime.get(timeKey);
+
+          if (existing) {
+            // Add to existing time slot based on label
+            if (r.label === "VIEWS") existing.views += r.quantity;
+            else if (r.label === "LIKES") existing.likes += r.quantity;
+            else if (r.label === "SHARES") existing.shares += r.quantity;
+            else if (r.label === "SAVES") existing.saves += r.quantity;
+            else if (r.label === "COMMENTS") existing.comments += r.quantity;
+
+            // Use worst status
+            if (r.status === "failed" || existing.status === "failed") existing.status = "failed";
+            else if (r.status === "processing" || existing.status === "processing") existing.status = "processing";
+            else if (r.status === "completed" && existing.status === "completed") existing.status = "completed";
+            else if (r.status === "cancelled" || existing.status === "cancelled") existing.status = "cancelled";
+          } else {
+            runsByTime.set(timeKey, {
+              time: timeKey,
+              views: r.label === "VIEWS" ? r.quantity : 0,
+              likes: r.label === "LIKES" ? r.quantity : 0,
+              shares: r.label === "SHARES" ? r.quantity : 0,
+              saves: r.label === "SAVES" ? r.quantity : 0,
+              comments: r.label === "COMMENTS" ? r.quantity : 0,
+              status: r.status,
+            });
+          }
+        }
+
+        // Sort by time and build RunStep array
+        const groupedRuns = Array.from(runsByTime.values())
+          .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+        let cumulativeViews = 0;
+        let cumulativeLikes = 0;
+        let cumulativeShares = 0;
+        let cumulativeSaves = 0;
+        let cumulativeComments = 0;
+
+        const firstTime = groupedRuns.length > 0 ? new Date(groupedRuns[0].time).getTime() : Date.now();
+
+        const runs = groupedRuns.map((r, i) => {
+          cumulativeViews += r.views;
+          cumulativeLikes += r.likes;
+          cumulativeShares += r.shares;
+          cumulativeSaves += r.saves;
+          cumulativeComments += r.comments;
+
+          const runTime = new Date(r.time).getTime();
+
+          return {
+            run: i + 1,
+            at: new Date(r.time),
+            minutesFromStart: Math.round((runTime - firstTime) / 60000),
+            views: r.views,
+            likes: r.likes,
+            shares: r.shares,
+            saves: r.saves,
+            comments: r.comments,
+            cumulativeViews,
+            cumulativeLikes,
+            cumulativeShares,
+            cumulativeSaves,
+            cumulativeComments,
+          };
+        });
+
+        // 🔥 FIX: Calculate totals from grouped runs
+        const totalViews = groupedRuns.reduce((sum, r) => sum + r.views, 0);
+        const totalLikes = groupedRuns.reduce((sum, r) => sum + r.likes, 0);
+        const totalShares = groupedRuns.reduce((sum, r) => sum + r.shares, 0);
+        const totalSaves = groupedRuns.reduce((sum, r) => sum + r.saves, 0);
+        const totalCommentsQty = groupedRuns.reduce((sum, r) => sum + r.comments, 0);
+
+        // 🔥 FIX: Build run statuses from grouped data
+        const runStatuses = groupedRuns.map(r => {
+          if (r.status === "completed") return "completed" as const;
+          if (r.status === "cancelled" || r.status === "failed") return "cancelled" as const;
+          return "pending" as const;
+        });
+
+        const completedCount = runStatuses.filter(s => s === "completed").length;
+
+        return {
+          id: order.schedulerOrderId,
+          name: order.name,
+          schedulerOrderId: order.schedulerOrderId,
+          smmOrderId: "N/A",
+          link: order.link,
+          totalViews,
+          startDelayHours: 0,
+          patternType: "manual" as const,
+          patternName: "Recovered",
+          runs,
+          engagement: {
+            likes: totalLikes,
+            shares: totalShares,
+            saves: totalSaves,
+            comments: totalCommentsQty,
+          },
+          serviceId: "auto",
+          selectedAPI: null,
+          selectedBundle: "",
+          status: order.status as any,
+          completedRuns: order.completedRuns ?? completedCount,
+          runStatuses,
+          createdAt: order.createdAt,
+          lastUpdatedAt: order.lastUpdatedAt,
+        };
+      });
+
+      setOrders(() => {
+        localStorage.setItem("dev-smm-orders", JSON.stringify(backendOrders));
+        return backendOrders;
+      });
+      console.log("✅ Orders loaded from backend:", backendOrders.length, "orders with grouped runs");
 
     } catch (err) {
-      console.error(err);
+      console.error("Failed to load orders from backend:", err);
     }
   }
 
