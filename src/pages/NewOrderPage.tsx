@@ -959,9 +959,24 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
               views: { serviceId: viewsServiceId, runs: viewRuns },
             };
 
-            if (includeLikes) servicesPayload.likes = { serviceId: likesServiceId, runs: likesRuns };
-            if (includeShares) servicesPayload.shares = { serviceId: sharesServiceId, runs: sharesRuns };
-            if (includeSaves) servicesPayload.saves = { serviceId: savesServiceId, runs: savesRuns };
+                        if (includeLikes) {
+              const filteredLikesRuns = likesRuns.filter(r => r.quantity > 0);
+              if (filteredLikesRuns.length > 0) {
+                servicesPayload.likes = { serviceId: likesServiceId, runs: filteredLikesRuns };
+              }
+            }
+            if (includeShares) {
+              const filteredSharesRuns = sharesRuns.filter(r => r.quantity > 0);
+              if (filteredSharesRuns.length > 0) {
+                servicesPayload.shares = { serviceId: sharesServiceId, runs: filteredSharesRuns };
+              }
+            }
+                        if (includeSaves) {
+              const filteredSavesRuns = savesRuns.filter(r => r.quantity > 0);
+              if (filteredSavesRuns.length > 0) {
+                servicesPayload.saves = { serviceId: savesServiceId, runs: filteredSavesRuns };
+              }
+            }
             if (includeComments && filteredCommentsRuns.length > 0) {
   servicesPayload.comments = {
     serviceId: commentsServiceId,
