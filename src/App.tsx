@@ -485,8 +485,16 @@ useEffect(() => {
         />
       );
     }
-    if (activePage === "dashboard") {
-      return <DashboardPage orders={orders} />;
+        if (activePage === "dashboard") {
+      return (
+        <DashboardPage
+          orders={orders}
+          onClearOrders={() => {
+            persistOrders([]);
+            localStorage.removeItem("dev-smm-orders");
+          }}
+        />
+      );
     }
     if (activePage === "orders") {
       return (
