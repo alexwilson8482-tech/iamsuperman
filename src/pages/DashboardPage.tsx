@@ -3,11 +3,12 @@ import type { CreatedOrder } from "../types/order";
 
 interface DashboardPageProps {
   orders: CreatedOrder[];
+  onClearOrders?: () => void;
 }
 
 type TimePeriod = "today" | "week" | "month" | "all";
 
-export function DashboardPage({ orders }: DashboardPageProps) {
+export function DashboardPage({ orders, onClearOrders }: DashboardPageProps) {
   const [period, setPeriod] = useState<TimePeriod>("all");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
@@ -173,9 +174,13 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     }
   };
 
-  const handleClearOrders = () => {
-    localStorage.removeItem("dev-smm-orders");
-    window.location.reload();
+    const handleClearOrders = () => {
+    if (onClearOrders) {
+      onClearOrders();
+    } else {
+      localStorage.removeItem("dev-smm-orders");
+      window.location.reload();
+    }
   };
 
   return (
