@@ -189,7 +189,7 @@ useEffect(() => {
           cumulativeSaves: 0,
           cumulativeComments: 0,
         })),
-        engagement: { likes: 0, shares: 0, saves: 0 },
+        engagement: { likes: 0, shares: 0, saves: 0, comments: 0 },
         serviceId: "auto",
         selectedAPI: null,
         selectedBundle: "",
