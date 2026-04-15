@@ -11,38 +11,29 @@ export function DashboardPage({ orders }: DashboardPageProps) {
   const [period, setPeriod] = useState<TimePeriod>("all");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  // 🦇 FIX: Same logic as OrdersPage to determine REAL status
+  // 🔥 FIX: Use backend status directly instead of guessing from time
   function getRealStatus(order: CreatedOrder): string {
+    if (order.status === "cancelled") return "cancelled";
+    if (order.status === "failed") return "failed";
+    if (order.status === "completed") return "completed";
+    if (order.status === "paused") return "paused";
+
     const runs = order.runs || [];
     const now = Date.now();
 
-    // Check if all runs are in the future (scheduled)
     if (runs.length > 0) {
       const allFuture = runs.every((run) => {
         const runTime = run?.at instanceof Date ? run.at.getTime() : new Date(run?.at ?? now).getTime();
         return runTime > now;
       });
-      if (allFuture && order.status !== "cancelled" && order.status !== "paused") {
-        return "scheduled";
-      }
+      if (allFuture) return "scheduled";
     }
 
-    // Check if all runs are completed (by time)
-    if (runs.length > 0) {
-      const allCompleted = runs.every((run) => {
-        const runTime = run?.at instanceof Date ? run.at.getTime() : new Date(run?.at ?? now).getTime();
-        return runTime <= now;
-      });
-      if (allCompleted) return "completed";
-    }
+    if (order.status === "processing" || order.status === "running") return "running";
 
-    if (order.status === "processing") return "running";
-    if (order.status === "pending") return "running";
-
-    return order.status;
+    return order.status || "running";
   }
 
-  // Filter orders by time period
   const filteredOrders = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -60,63 +51,59 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     });
   }, [orders, period]);
 
-  // 🦇 FIX: Calculate stats using getRealStatus()
   const stats = useMemo(() => {
     const total = filteredOrders.length;
-    
-    // Use getRealStatus for accurate counting
+
     const running = filteredOrders.filter((o) => {
-      const realStatus = getRealStatus(o);
-      return realStatus === "running" || realStatus === "processing" || realStatus === "paused";
-    }).length;
-    
-    const completed = filteredOrders.filter((o) => {
-      const realStatus = getRealStatus(o);
-      return realStatus === "completed";
-    }).length;
-    
-    const failed = filteredOrders.filter((o) => {
-      const realStatus = getRealStatus(o);
-      return realStatus === "failed" || realStatus === "cancelled";
+      const s = getRealStatus(o);
+      return s === "running" || s === "processing" || s === "paused";
     }).length;
 
-    const scheduled = filteredOrders.filter((o) => {
-      const realStatus = getRealStatus(o);
-      return realStatus === "scheduled";
+    const completed = filteredOrders.filter((o) => getRealStatus(o) === "completed").length;
+    const failed = filteredOrders.filter((o) => {
+      const s = getRealStatus(o);
+      return s === "failed" || s === "cancelled";
     }).length;
-    
+    const scheduled = filteredOrders.filter((o) => getRealStatus(o) === "scheduled").length;
     const successRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
     return { total, running, completed, failed, scheduled, successRate };
   }, [filteredOrders]);
 
-  // Calculate services breakdown
+  // 🔥 FIX: Services breakdown now uses totalViews + engagement for backend-loaded orders
   const servicesBreakdown = useMemo(() => {
     let views = 0;
     let likes = 0;
     let shares = 0;
     let saves = 0;
+    let comments = 0;
 
     filteredOrders.forEach((order) => {
-      (order.runs || []).forEach((run) => {
-        views += run.views || 0;
-        likes += run.likes || 0;
-        shares += run.shares || 0;
-        saves += run.saves || 0;
-      });
+      const runViews = (order.runs || []).reduce((sum, run) => sum + (run.views || 0), 0);
+      const runLikes = (order.runs || []).reduce((sum, run) => sum + (run.likes || 0), 0);
+      const runShares = (order.runs || []).reduce((sum, run) => sum + (run.shares || 0), 0);
+      const runSaves = (order.runs || []).reduce((sum, run) => sum + (run.saves || 0), 0);
+      const runComments = (order.runs || []).reduce((sum, run) => sum + (run.comments || 0), 0);
+
+      // 🔥 FIX: If runs have 0 views (backend-loaded), fall back to order-level data
+      views += runViews > 0 ? runViews : (order.totalViews || 0);
+      likes += runLikes > 0 ? runLikes : (order.engagement?.likes || 0);
+      shares += runShares > 0 ? runShares : (order.engagement?.shares || 0);
+      saves += runSaves > 0 ? runSaves : (order.engagement?.saves || 0);
+      comments += runComments > 0 ? runComments : (order.engagement?.comments || 0);
     });
 
-    const total = views + likes + shares + saves;
+    const total = views + likes + shares + saves + comments;
     return {
       views: { count: views, percent: total > 0 ? Math.round((views / total) * 100) : 0 },
       likes: { count: likes, percent: total > 0 ? Math.round((likes / total) * 100) : 0 },
       shares: { count: shares, percent: total > 0 ? Math.round((shares / total) * 100) : 0 },
       saves: { count: saves, percent: total > 0 ? Math.round((saves / total) * 100) : 0 },
+      comments: { count: comments, percent: total > 0 ? Math.round((comments / total) * 100) : 0 },
       total,
     };
   }, [filteredOrders]);
 
-  // Get last 7 days data for chart
   const chartData = useMemo(() => {
     const days: { label: string; count: number; date: Date }[] = [];
     const now = new Date();
@@ -144,71 +131,45 @@ export function DashboardPage({ orders }: DashboardPageProps) {
     return { days, maxCount };
   }, [orders]);
 
-  // 🦇 FIX: Recent orders with real status
   const recentOrders = useMemo(() => {
     return [...orders]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 5);
   }, [orders]);
 
-  // Get status color using real status
   const getStatusColor = (order: CreatedOrder) => {
     const status = getRealStatus(order);
     switch (status) {
-      case "running":
-      case "processing":
-        return "text-yellow-400";
-      case "completed":
-        return "text-emerald-400";
-      case "paused":
-        return "text-orange-400";
-      case "scheduled":
-        return "text-blue-400";
-      case "failed":
-      case "cancelled":
-        return "text-red-400";
-      default:
-        return "text-gray-400";
+      case "running": case "processing": return "text-yellow-400";
+      case "completed": return "text-emerald-400";
+      case "paused": return "text-orange-400";
+      case "scheduled": return "text-blue-400";
+      case "failed": case "cancelled": return "text-red-400";
+      default: return "text-gray-400";
     }
   };
 
   const getStatusBg = (order: CreatedOrder) => {
     const status = getRealStatus(order);
     switch (status) {
-      case "running":
-      case "processing":
-        return "bg-yellow-500/20";
-      case "completed":
-        return "bg-emerald-500/20";
-      case "paused":
-        return "bg-orange-500/20";
-      case "scheduled":
-        return "bg-blue-500/20";
-      case "failed":
-      case "cancelled":
-        return "bg-red-500/20";
-      default:
-        return "bg-gray-500/20";
+      case "running": case "processing": return "bg-yellow-500/20";
+      case "completed": return "bg-emerald-500/20";
+      case "paused": return "bg-orange-500/20";
+      case "scheduled": return "bg-blue-500/20";
+      case "failed": case "cancelled": return "bg-red-500/20";
+      default: return "bg-gray-500/20";
     }
   };
 
   const getStatusIcon = (order: CreatedOrder) => {
     const status = getRealStatus(order);
     switch (status) {
-      case "running":
-      case "processing":
-        return "⚡";
-      case "completed":
-        return "✅";
-      case "paused":
-        return "⏸️";
-      case "scheduled":
-        return "📅";
-      case "failed":
-      case "cancelled":
-        return "❌";
-      default:
-        return "📦";
+      case "running": case "processing": return "⚡";
+      case "completed": return "✅";
+      case "paused": return "⏸️";
+      case "scheduled": return "📅";
+      case "failed": case "cancelled": return "❌";
+      default: return "📦";
     }
   };
 
@@ -229,7 +190,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           <p className="mt-1 text-sm text-gray-500">Monitoring all operations across the city</p>
         </div>
 
-        {/* Time Period Filter */}
         <div className="inline-flex rounded-lg border border-yellow-500/30 bg-black p-1">
           {[
             { key: "today", label: "Today" },
@@ -242,9 +202,7 @@ export function DashboardPage({ orders }: DashboardPageProps) {
               type="button"
               onClick={() => setPeriod(item.key as TimePeriod)}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                period === item.key
-                  ? "bg-yellow-500/20 text-yellow-400"
-                  : "text-gray-500 hover:text-yellow-300"
+                period === item.key ? "bg-yellow-500/20 text-yellow-400" : "text-gray-500 hover:text-yellow-300"
               }`}
             >
               {item.label}
@@ -253,9 +211,8 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         </div>
       </div>
 
-      {/* Stats Cards - Now shows 5 cards including Scheduled */}
+      {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {/* Total Orders */}
         <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Total Missions</p>
@@ -263,14 +220,10 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           </div>
           <p className="mt-3 text-3xl font-bold text-white">{stats.total}</p>
           <p className="mt-1 text-xs text-gray-600">
-            {period === "today" && "Deployed today"}
-            {period === "week" && "Last 7 nights"}
-            {period === "month" && "Last 30 nights"}
-            {period === "all" && "All time"}
+            {period === "today" ? "Deployed today" : period === "week" ? "Last 7 nights" : period === "month" ? "Last 30 nights" : "All time"}
           </p>
         </div>
 
-        {/* Running Orders */}
         <div className="rounded-xl border border-yellow-500/30 bg-gradient-to-br from-yellow-500/10 to-black p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-yellow-500">Active</p>
@@ -278,19 +231,17 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           </div>
           <p className="mt-3 text-3xl font-bold text-yellow-400">{stats.running}</p>
           <div className="mt-2 flex items-center gap-1">
-            {stats.running > 0 && (
+            {stats.running > 0 ? (
               <>
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-yellow-400"></span>
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-yellow-400" />
                 <p className="text-xs text-yellow-500/70">In progress</p>
               </>
-            )}
-            {stats.running === 0 && (
+            ) : (
               <p className="text-xs text-yellow-500/70">No active missions</p>
             )}
           </div>
         </div>
 
-        {/* Scheduled Orders */}
         <div className="rounded-xl border border-blue-500/30 bg-gradient-to-br from-blue-500/10 to-black p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-blue-500">Scheduled</p>
@@ -300,7 +251,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           <p className="mt-1 text-xs text-blue-500/70">Awaiting deployment</p>
         </div>
 
-        {/* Completed Orders */}
         <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-black p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-emerald-500">Completed</p>
@@ -310,7 +260,6 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           <p className="mt-1 text-xs text-emerald-500/70">Mission accomplished</p>
         </div>
 
-        {/* Failed Orders */}
         <div className="rounded-xl border border-red-500/30 bg-gradient-to-br from-red-500/10 to-black p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-red-500">Failed</p>
@@ -321,7 +270,7 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         </div>
       </div>
 
-      {/* Success Rate Bar */}
+      {/* Success Rate */}
       <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-r from-gray-900 to-black p-5">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-yellow-400">🎯 Mission Success Rate</h3>
@@ -331,9 +280,7 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         </div>
         <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-gray-800">
           <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              stats.successRate >= 70 ? "bg-emerald-500" : stats.successRate >= 40 ? "bg-yellow-500" : "bg-red-500"
-            }`}
+            className={`h-full rounded-full transition-all duration-500 ${stats.successRate >= 70 ? "bg-emerald-500" : stats.successRate >= 40 ? "bg-yellow-500" : "bg-red-500"}`}
             style={{ width: `${stats.successRate}%` }}
           />
         </div>
@@ -343,9 +290,9 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         </div>
       </div>
 
-      {/* Two Column Layout */}
+      {/* Two Column */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Orders Chart */}
+        {/* Chart */}
         <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-5">
           <h3 className="text-sm font-medium text-yellow-400">📈 Night Patrol Activity</h3>
           <div className="mt-5 flex h-40 items-end justify-between gap-2">
@@ -357,64 +304,38 @@ export function DashboardPage({ orders }: DashboardPageProps) {
                   <span className="text-xs text-gray-500">{day.count}</span>
                   <div className="relative w-full flex-1">
                     <div
-                      className={`absolute bottom-0 w-full rounded-t-md transition-all duration-500 ${
-                        isToday ? "bg-yellow-500" : "bg-gray-700"
-                      }`}
+                      className={`absolute bottom-0 w-full rounded-t-md transition-all duration-500 ${isToday ? "bg-yellow-500" : "bg-gray-700"}`}
                       style={{ height: `${Math.max(height, 4)}%` }}
                     />
                   </div>
-                  <span className={`text-xs ${isToday ? "text-yellow-400 font-medium" : "text-gray-600"}`}>
-                    {day.label}
-                  </span>
+                  <span className={`text-xs ${isToday ? "text-yellow-400 font-medium" : "text-gray-600"}`}>{day.label}</span>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* Services Breakdown */}
+        {/* Services Breakdown - 🔥 FIX: Added Comments */}
         <div className="rounded-xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-5">
           <h3 className="text-sm font-medium text-yellow-400">🦇 Arsenal Breakdown</h3>
           <div className="mt-5 space-y-4">
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400">👁️ Views</span>
-                <span className="text-gray-500">{servicesBreakdown.views.count.toLocaleString()} ({servicesBreakdown.views.percent}%)</span>
+            {[
+              { label: "👁️ Views", data: servicesBreakdown.views, color: "bg-yellow-500" },
+              { label: "❤️ Likes", data: servicesBreakdown.likes, color: "bg-yellow-600" },
+              { label: "🔄 Shares", data: servicesBreakdown.shares, color: "bg-yellow-700" },
+              { label: "🔖 Saves", data: servicesBreakdown.saves, color: "bg-amber-600" },
+              { label: "💬 Comments", data: servicesBreakdown.comments, color: "bg-pink-500" },
+            ].map((item) => (
+              <div key={item.label}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400">{item.label}</span>
+                  <span className="text-gray-500">{item.data.count.toLocaleString()} ({item.data.percent}%)</span>
+                </div>
+                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
+                  <div className={`h-full rounded-full ${item.color} transition-all duration-500`} style={{ width: `${item.data.percent}%` }} />
+                </div>
               </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
-                <div className="h-full rounded-full bg-yellow-500 transition-all duration-500" style={{ width: `${servicesBreakdown.views.percent}%` }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400">❤️ Likes</span>
-                <span className="text-gray-500">{servicesBreakdown.likes.count.toLocaleString()} ({servicesBreakdown.likes.percent}%)</span>
-              </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
-                <div className="h-full rounded-full bg-yellow-600 transition-all duration-500" style={{ width: `${servicesBreakdown.likes.percent}%` }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400">🔄 Shares</span>
-                <span className="text-gray-500">{servicesBreakdown.shares.count.toLocaleString()} ({servicesBreakdown.shares.percent}%)</span>
-              </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
-                <div className="h-full rounded-full bg-yellow-700 transition-all duration-500" style={{ width: `${servicesBreakdown.shares.percent}%` }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400">🔖 Saves</span>
-                <span className="text-gray-500">{servicesBreakdown.saves.count.toLocaleString()} ({servicesBreakdown.saves.percent}%)</span>
-              </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-800">
-                <div className="h-full rounded-full bg-amber-600 transition-all duration-500" style={{ width: `${servicesBreakdown.saves.percent}%` }} />
-              </div>
-            </div>
+            ))}
 
             <div className="mt-4 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 text-center">
               <p className="text-xs text-gray-500">Total Engagements</p>
@@ -435,28 +356,21 @@ export function DashboardPage({ orders }: DashboardPageProps) {
           <div className="mt-5 rounded-lg border border-dashed border-yellow-500/30 py-8 text-center">
             <span className="text-4xl">🦇</span>
             <p className="mt-2 text-sm text-gray-500">No missions deployed yet</p>
-            <p className="mt-1 text-xs text-gray-600">The night is quiet... for now</p>
           </div>
         ) : (
           <div className="mt-4 space-y-2">
             {recentOrders.map((order) => {
               const realStatus = getRealStatus(order);
               return (
-                <div
-                  key={order.id}
-                  className="flex items-center justify-between rounded-lg border border-gray-800 bg-black/50 p-3 transition hover:border-yellow-500/30"
-                >
+                <div key={order.id} className="flex items-center justify-between rounded-lg border border-gray-800 bg-black/50 p-3 transition hover:border-yellow-500/30">
                   <div className="flex items-center gap-3">
                     <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-sm ${getStatusBg(order)}`}>
                       {getStatusIcon(order)}
                     </span>
                     <div>
-                      <p className="text-sm font-medium text-white">
-                        {order.name || `Mission #${order.id.slice(0, 8)}`}
-                      </p>
+                      <p className="text-sm font-medium text-white">{order.name || `Mission #${order.id.slice(0, 8)}`}</p>
                       <p className="text-xs text-gray-600">
-                        {new Date(order.createdAt).toLocaleDateString()} at{" "}
-                        {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {new Date(order.createdAt).toLocaleDateString()} at {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </p>
                     </div>
                   </div>
@@ -464,9 +378,7 @@ export function DashboardPage({ orders }: DashboardPageProps) {
                     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${getStatusBg(order)} ${getStatusColor(order)}`}>
                       {realStatus}
                     </span>
-                    <p className="mt-1 text-xs text-gray-600">
-                      {order.runs?.length || 0} runs
-                    </p>
+                    <p className="mt-1 text-xs text-gray-600">{order.runs?.length || 0} runs</p>
                   </div>
                 </div>
               );
@@ -475,14 +387,12 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         )}
       </div>
 
-      {/* Quick Stats Footer */}
+      {/* Quick Stats */}
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-yellow-500/20 bg-black p-4 text-center">
           <p className="text-xs text-gray-500">Avg Runs/Mission</p>
           <p className="mt-1 text-xl font-bold text-yellow-400">
-            {filteredOrders.length > 0
-              ? Math.round(filteredOrders.reduce((sum, o) => sum + (o.runs?.length || 0), 0) / filteredOrders.length)
-              : 0}
+            {filteredOrders.length > 0 ? Math.round(filteredOrders.reduce((sum, o) => sum + (o.runs?.length || 0), 0) / filteredOrders.length) : 0}
           </p>
         </div>
         <div className="rounded-xl border border-yellow-500/20 bg-black p-4 text-center">
@@ -499,41 +409,28 @@ export function DashboardPage({ orders }: DashboardPageProps) {
         </div>
       </div>
 
-      {/* Clear Orders Button */}
+      {/* Clear Orders */}
       <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-medium text-orange-300">🧹 Clear Orders</h3>
             <p className="mt-1 text-xs text-orange-400/70">
-              Delete all orders for a fresh start.
-              <br />
+              Delete all orders for a fresh start.<br />
               <span className="text-emerald-400">✓ APIs and Bundles will be kept safe!</span>
             </p>
           </div>
 
           {!showClearConfirm ? (
-            <button
-              type="button"
-              onClick={() => setShowClearConfirm(true)}
-              className="rounded-lg border border-orange-500/50 bg-orange-500/10 px-4 py-2 text-sm font-medium text-orange-200 transition hover:bg-orange-500/20"
-            >
+            <button type="button" onClick={() => setShowClearConfirm(true)} className="rounded-lg border border-orange-500/50 bg-orange-500/10 px-4 py-2 text-sm font-medium text-orange-200 transition hover:bg-orange-500/20">
               🗑️ Clear Orders
             </button>
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-xs text-orange-300">Are you sure?</span>
-              <button
-                type="button"
-                onClick={handleClearOrders}
-                className="rounded-lg border border-red-500 bg-red-500/30 px-4 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/50"
-              >
+              <button type="button" onClick={handleClearOrders} className="rounded-lg border border-red-500 bg-red-500/30 px-4 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/50">
                 ✓ Yes, Delete Orders
               </button>
-              <button
-                type="button"
-                onClick={() => setShowClearConfirm(false)}
-                className="rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700"
-              >
+              <button type="button" onClick={() => setShowClearConfirm(false)} className="rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700">
                 ✕ Cancel
               </button>
             </div>
