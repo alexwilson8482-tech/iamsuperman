@@ -97,11 +97,17 @@ function hydrateOrderDates(orders: CreatedOrder[]): CreatedOrder[] {
       ? safeRuns.map((_, index) => order.runErrors?.[index] ?? "")
       : safeRuns.map(() => "");
 
-    return {
+        return {
       ...order,
       name: order?.name || `Order #${order?.id ?? Date.now()}`,
       smmOrderId: order?.smmOrderId ?? "N/A",
       serviceId: order?.serviceId ?? "N/A",
+      engagement: {
+        likes: order?.engagement?.likes ?? 0,
+        shares: order?.engagement?.shares ?? 0,
+        saves: order?.engagement?.saves ?? 0,
+        comments: (order?.engagement as any)?.comments ?? 0,
+      },
       status:
         order?.status === "failed" ||
         order?.status === "paused" ||
