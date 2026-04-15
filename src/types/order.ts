@@ -29,7 +29,7 @@ export interface OrderConfig {
   peakHoursBoost: boolean;
   quickPreset: QuickPatternPreset | null;
   delivery: DeliveryOption;
-  minViewsPerRun: number; // 🔥 NEW: Dynamic minimum views per run
+  minViewsPerRun: number;
 }
 
 export interface RunStep {
@@ -89,12 +89,12 @@ export interface Bundle {
   apiId: string;
   name: string;
   serviceIds: {
-  views: string;
-  likes: string;
-  shares: string;
-  saves: string;
-  comments: string;
-};
+    views: string;
+    likes: string;
+    shares: string;
+    saves: string;
+    comments: string;
+  };
 }
 
 export interface BackendRunInfo {
@@ -114,6 +114,7 @@ export interface BackendRunInfo {
   smmOrderId: string | null;
 }
 
+// 🔥 FIX: engagement now includes comments
 export interface CreatedOrder {
   id: string;
   name: string;
@@ -132,6 +133,7 @@ export interface CreatedOrder {
     likes: number;
     shares: number;
     saves: number;
+    comments: number;
   };
   serviceId: string;
   selectedAPI: string | null;
