@@ -95,12 +95,11 @@ export function NewOrderPage({ apis, bundles, orders, prefillOrder, onCreateOrde
   // 🔥 NEW: Minimum views per run state
   const [minViewsPerRun, setMinViewsPerRun] = useState(100);
 
-  // 🔥 NEW: Fetch min views setting from backend on mount
+    // 🔥 NEW: Fetch min views setting from backend on mount
   useEffect(() => {
     const fetchMinViews = async () => {
       try {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL || "https://backend-y30y.onrender.com";
-        const response = await fetch(`${backendUrl}/api/settings/min-views`);
+        const response = await fetch("https://iamsuperman-backend.onrender.com/api/settings/min-views");
         if (response.ok) {
           const data = await response.json();
           if (data.minViewsPerRun) {
@@ -265,15 +264,14 @@ const commentsService = selectedApi?.services.find(
   };
 
   // 🔥 NEW: Handle min views change - regenerate pattern when changed
-  const handleMinViewsChange = (value: number) => {
+    const handleMinViewsChange = (value: number) => {
     const newValue = Math.max(1, Math.floor(value));
     setMinViewsPerRun(newValue);
     setUseClonedPlan(false);
-    setSeed((current) => current + 1); // 🔥 Force regenerate pattern
+    setSeed((current) => current + 1);
 
     // Also update backend
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || "https://backend-y30y.onrender.com";
-    fetch(`${backendUrl}/api/settings/min-views`, {
+    fetch("https://iamsuperman-backend.onrender.com/api/settings/min-views", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ minViewsPerRun: newValue }),
