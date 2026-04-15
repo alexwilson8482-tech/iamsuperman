@@ -1,279 +1,264 @@
-import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import type { CreatedOrder, OrderStatus } from "../types/order";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import type { CreatedOrder } from "../types/order";
 import { RunTable } from "./RunTable";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  ResponsiveContainer,
-} from "recharts";
 
 interface OrderCardProps {
   order: CreatedOrder;
+  controlBusy: boolean;
   onControl: (order: CreatedOrder, action: "pause" | "resume" | "cancel") => void;
   onClone: (order: CreatedOrder) => void;
-  controlBusy: boolean;
 }
 
-const statusColor: Record<OrderStatus, string> = {
-  running: "text-yellow-300",
-  paused: "text-amber-300",
-  cancelled: "text-red-300",
-  completed: "text-emerald-300",
-  processing: "text-yellow-300",
-  failed: "text-red-300",
-};
+function getRealStatus(order: CreatedOrder): string {
+  if (order.status === "cancelled") return "cancelled";
+  if (order.status === "failed") return "failed";
 
-export function OrderCard({ order, onControl, onClone, controlBusy }: OrderCardProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const safeRuns = order?.runs || [];
-  const safeRunStatuses = order?.runStatuses || [];
-  const safeRunErrors = order?.runErrors || [];
-  const finishTime = safeRuns[safeRuns.length - 1]?.at;
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNowMs(Date.now()), 4000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const { totalRuns, completedRuns, progressPercent } = useMemo(() => {
-    const nextTotalRuns = Math.max(1, safeRuns.length);
-    const completedFromStatuses = safeRunStatuses.filter((status) => status === "completed").length;
-    const completedFromTime = safeRuns.reduce((count, run) => {
-      const runTime = run?.at instanceof Date ? run.at.getTime() : new Date(run?.at ?? Date.now()).getTime();
-      return runTime <= nowMs ? count + 1 : count;
-    }, 0);
-    const isTimeTrackedStatus = order.status === "running" || order.status === "processing" || order.status === "completed";
-    const nextCompletedRuns = Math.min(
-      nextTotalRuns,
-      Math.max(
-        0,
-        order.status === "completed" ? nextTotalRuns : 0,
-        Number.isFinite(order.completedRuns) ? order.completedRuns : 0,
-        completedFromStatuses,
-        isTimeTrackedStatus ? completedFromTime : 0
-      )
-    );
-    const nextProgressPercent = Math.round((nextCompletedRuns / nextTotalRuns) * 100);
-    return { totalRuns: nextTotalRuns, completedRuns: nextCompletedRuns, progressPercent: nextProgressPercent };
-  }, [safeRuns, safeRunStatuses, order.status, order.completedRuns, nowMs]);
-
-  const effectiveStatus = useMemo(() => {
-    const runs = order.runs || [];
-    const now = Date.now();
-
-    if (runs.length > 0) {
-      const allCompleted = runs.every((run) => {
-        const runTime = new Date(run.at).getTime();
-        return runTime <= now;
-      });
-
-      if (allCompleted) return "completed";
-    }
-
-    if (order.status === "processing") return "running";
-
-    return order.status;
-  }, [order, nowMs]);
-
-  const graphData = useMemo(() => {
-  const runs = Array.isArray(order?.runs) ? order.runs : [];
-
-  let v = 0, l = 0, sh = 0, sa = 0, c = 0;
-
-  return runs.map((run, index) => {
-    if (!run) return null;
-
-    const runTime = run?.at ? new Date(run.at).getTime() : 0;
-
-    if (runTime <= nowMs) {
-      v += Number(run?.views || 0);
-      l += Number(run?.likes || 0);
-      sh += Number(run?.shares || 0);
-      sa += Number(run?.saves || 0);
-      c += Number(run?.comments || 0);
-    }
-
-    return {
-  time: run.at,
-  views: v,
-  likes: l,
-  shares: sh,
-  saves: sa,
-  comments: c,
-};
-  }).filter(Boolean);
-}, [order?.runs, nowMs]);
-
-  const plannedData = useMemo(() => {
   const runs = order.runs || [];
+  const now = Date.now();
 
-  return runs.map((run, index) => ({
-    time: run.at,
-    views: run.cumulativeViews || 0,
-    likes: (run.cumulativeLikes || 0) * 10,
-shares: (run.cumulativeShares || 0) * 10,
-saves: (run.cumulativeSaves || 0) * 10,
-comments: (run.cumulativeComments || 0) * 10,
-  }));
-}, [order.runs]);
-  
-  const shortLink =
-    order.link.length > 56 ? `${order.link.slice(0, 36)}...${order.link.slice(-14)}` : order.link;
+  if (runs.length > 0) {
+    const allFuture = runs.every((run) => {
+      const runTime = run?.at instanceof Date ? run.at.getTime() : new Date(run?.at ?? now).getTime();
+      return runTime > now;
+    });
+    if (allFuture && order.status !== "paused") return "scheduled";
+  }
 
-  // 🔥 FIX: Remove the legacy /api/cancel call - use onControl for everything
-  const handleControl = async (action: "pause" | "resume" | "cancel") => {
-    try {
-      if (action === "cancel") {
-        const confirmCancel = window.confirm("Are you sure you want to cancel this mission?");
-        if (!confirmCancel) return;
-      }
+  if (runs.length > 0) {
+    const allCompleted = runs.every((run) => {
+      const runTime = run?.at instanceof Date ? run.at.getTime() : new Date(run?.at ?? now).getTime();
+      return runTime <= now;
+    });
+    if (allCompleted) return "completed";
+  }
 
-      // ✅ FIX: Always use onControl (which calls /api/order/control with schedulerOrderId)
-      onControl(order, action);
+  if (order.status === "processing") return "running";
+  if (order.status === "pending") return "running";
 
-    } catch (err) {
-      console.error("Control action failed", err);
-      alert("Action failed. Please try again.");
-    }
-  };
+  return order.status;
+}
+
+function toShortLink(link: string) {
+  if (!link) return "-";
+  return link.length > 55 ? `${link.slice(0, 35)}...${link.slice(-15)}` : link;
+}
+
+const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+  running: { bg: "bg-yellow-500/15", text: "text-yellow-300", dot: "bg-yellow-400" },
+  processing: { bg: "bg-yellow-500/15", text: "text-yellow-300", dot: "bg-yellow-400" },
+  completed: { bg: "bg-emerald-500/15", text: "text-emerald-300", dot: "bg-emerald-400" },
+  scheduled: { bg: "bg-amber-500/15", text: "text-amber-300", dot: "bg-amber-400" },
+  paused: { bg: "bg-orange-500/15", text: "text-orange-300", dot: "bg-orange-400" },
+  cancelled: { bg: "bg-red-500/15", text: "text-red-300", dot: "bg-red-400" },
+  pending: { bg: "bg-gray-500/15", text: "text-gray-300", dot: "bg-gray-400" },
+  failed: { bg: "bg-red-500/15", text: "text-red-300", dot: "bg-red-400" },
+};
+
+export function OrderCard({ order, controlBusy, onControl, onClone }: OrderCardProps) {
+  const [showRuns, setShowRuns] = useState(false);
+  const status = getRealStatus(order);
+  const colors = STATUS_COLORS[status] || STATUS_COLORS.pending;
+  const isCancelled = status === "cancelled" || status === "failed";
+  const safeRuns = order.runs || [];
+  const safeRunStatuses = order.runStatuses || [];
+  const safeRunErrors = order.runErrors || [];
+
+  const progress = (() => {
+    const total = safeRuns.length;
+    if (total === 0) return { percent: 0, completed: 0, total: 0 };
+    const now = Date.now();
+    const timeCompleted = safeRuns.reduce((count, run) => {
+      const runMs = run?.at instanceof Date ? run.at.getTime() : new Date(run?.at ?? now).getTime();
+      return runMs <= now ? count + 1 : count;
+    }, 0);
+    const statusCompleted = safeRunStatuses.filter((s) => s === "completed").length;
+    const completed = Math.min(total, Math.max(order.completedRuns || 0, statusCompleted, timeCompleted));
+    return { percent: Math.round((completed / total) * 100), completed, total };
+  })();
 
   return (
-    <article className="rounded-2xl border border-yellow-500/20 bg-gradient-to-br from-gray-900 to-black p-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <p className="text-xs uppercase tracking-wide text-gray-600">Mission ID</p>
-          <h3 className="text-lg font-semibold text-yellow-400">{order.id}</h3>
-          <p className="text-sm text-yellow-300">{order.name || `Mission #${order.id}`}</p>
-          <p className="max-w-xl truncate text-sm text-gray-500" title={order.link || "No link provided"}>
-            {shortLink || "No link provided"}
-          </p>
+    <div className={`rounded-xl border bg-gradient-to-br from-gray-900 to-black p-5 ${isCancelled ? "border-red-500/30" : "border-yellow-500/20"}`}>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h3 className={`text-lg font-semibold ${isCancelled ? "text-red-400" : "text-yellow-400"}`}>
+            {order.name || `Mission #${order.id}`}
+          </h3>
+          <p className="mt-1 text-xs text-gray-600 font-mono">{order.id}</p>
           {order.schedulerOrderId && (
-            <p className="text-xs text-gray-600 font-mono">
-              Scheduler: {order.schedulerOrderId}
-            </p>
+            <p className="text-[9px] text-gray-700 font-mono">Scheduler: {order.schedulerOrderId}</p>
           )}
         </div>
-        <div className="space-y-2 text-right">
-          <p className="text-sm text-gray-500">Panel ID: <span className="font-semibold text-yellow-300">{order.smmOrderId}</span></p>
-          <p className="text-sm text-gray-500">Service: <span className="font-semibold text-gray-300">{order.serviceId}</span></p>
-          <p className="text-sm text-gray-500">Quantity: <span className="font-semibold text-gray-300">{order.totalViews}</span></p>
-          <p className="text-sm text-gray-500">Status: <span className={`font-semibold ${statusColor[effectiveStatus]}`}>{effectiveStatus}</span></p>
-          {order.errorMessage && <p className="text-xs text-red-400">Error: {order.errorMessage}</p>}
-          {finishTime && <p className="text-xs text-gray-600">ETA: {finishTime.toLocaleString()}</p>}
-          <p className="text-xs text-gray-600">Updated: {new Date(order.lastUpdatedAt || order.createdAt).toLocaleString()}</p>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${colors.bg} ${colors.text}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${colors.dot} ${status === "running" ? "animate-pulse" : ""}`} />
+          {status.charAt(0).toUpperCase() + status.slice(1)}
+        </span>
+      </div>
+
+      {/* Link */}
+      <div className="mt-3">
+        <a href={order.link} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:text-blue-300 hover:underline">
+          {toShortLink(order.link)}
+        </a>
+      </div>
+
+      {/* Error */}
+      {order.errorMessage && (
+        <div className="mt-2 rounded-md bg-red-500/10 border border-red-500/20 px-3 py-2">
+          <p className="text-xs text-red-400">❌ {order.errorMessage}</p>
+        </div>
+      )}
+
+      {/* Progress */}
+      <div className="mt-4">
+        <div className="flex items-center justify-between text-xs mb-1.5">
+          <span className="text-gray-500">Progress</span>
+          <span className="text-gray-400">{progress.completed}/{progress.total} runs ({progress.percent}%)</span>
+        </div>
+        <div className="w-full overflow-hidden rounded-full bg-gray-800 h-2">
+          <div
+            className={`h-2 rounded-full transition-all duration-500 ${
+              progress.percent === 100 ? "bg-emerald-500" : progress.percent > 50 ? "bg-yellow-500" : "bg-yellow-600"
+            }`}
+            style={{ width: `${progress.percent}%` }}
+          />
         </div>
       </div>
 
-      <div className="mt-4 space-y-2">
-        <div className="flex items-center justify-between text-xs text-gray-500">
-          <span>Progress</span>
-          <span>{progressPercent}%</span>
+      {/* Stats */}
+      <div className="mt-4 grid grid-cols-5 gap-2">
+        <div className="rounded-md bg-black/50 border border-gray-800 px-2 py-2 text-center">
+          <p className="text-sm font-medium text-yellow-400">{(order.totalViews / 1000).toFixed(0)}k</p>
+          <p className="text-[9px] text-gray-600">Views</p>
         </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-gray-800">
-          <div className="h-full rounded-full bg-yellow-500 transition-all" style={{ width: `${progressPercent}%` }} />
+        <div className="rounded-md bg-black/50 border border-gray-800 px-2 py-2 text-center">
+          <p className="text-sm font-medium text-pink-400">{order.engagement.likes}</p>
+          <p className="text-[9px] text-gray-600">Likes</p>
         </div>
-        <p className="text-xs text-gray-500">
-          {completedRuns} / {totalRuns} runs completed
-        </p>
-        <div className="mt-4 h-48 w-full">
-  <ResponsiveContainer width="100%" height="100%">
-    <LineChart data={plannedData}>
-      <CartesianGrid strokeDasharray="3 3" stroke="#111" opacity={0.3} />
-      <XAxis
-  dataKey="time"
-  stroke="#666"
-  tickFormatter={(time) => {
-    const d = new Date(time);
-    return d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0");
-  }}
-/>
-      <YAxis stroke="#666" />
-
-      <Tooltip
-  formatter={(value, name) => {
-    if (name?.startsWith("planned")) return null; // ❌ hide planned
-    return [value, name];
-  }}
-/>
-
-      {/* Planned (faded lines) */}
-<Line type="monotone" dataKey="views" stroke="#3b82f6" opacity={0.1} dot={false} strokeDasharray="5 5" name="planned-views" />
-<Line type="monotone" dataKey="likes" stroke="#ec4899" opacity={0.1} dot={false} strokeDasharray="5 5" name="planned-likes" />
-<Line type="monotone" dataKey="shares" stroke="#22c55e" opacity={0.1} dot={false} strokeDasharray="5 5" name="planned-shares" />
-<Line type="monotone" dataKey="saves" stroke="#eab308" opacity={0.1} dot={false} strokeDasharray="5 5" name="planned-saves" />
-<Line type="monotone" dataKey="comments" stroke="#a855f7" opacity={0.1} dot={false} strokeDasharray="5 5" name="planned-comments" />
-      <Line type="monotone" dataKey="views" stroke="#3b82f6" strokeWidth={2} dot={false} />
-<Line type="monotone" dataKey="likes" stroke="#ec4899" strokeWidth={2} dot={false} />
-<Line type="monotone" dataKey="shares" stroke="#22c55e" strokeWidth={2} dot={false} /> {/* 🔥 ADD THIS */}
-<Line type="monotone" dataKey="comments" stroke="#a855f7" strokeWidth={2} dot={false} />
-    </LineChart>
-  </ResponsiveContainer>
-</div>
+        <div className="rounded-md bg-black/50 border border-gray-800 px-2 py-2 text-center">
+          <p className="text-sm font-medium text-blue-400">{order.engagement.shares}</p>
+          <p className="text-[9px] text-gray-600">Shares</p>
+        </div>
+        <div className="rounded-md bg-black/50 border border-gray-800 px-2 py-2 text-center">
+          <p className="text-sm font-medium text-purple-400">{order.engagement.saves}</p>
+          <p className="text-[9px] text-gray-600">Saves</p>
+        </div>
+        <div className="rounded-md bg-black/50 border border-gray-800 px-2 py-2 text-center">
+          <p className="text-sm font-medium text-pink-400">{order.engagement.comments || 0}</p>
+          <p className="text-[9px] text-gray-600">Comments</p>
+        </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      {/* Info Row */}
+      <div className="mt-3 grid grid-cols-3 gap-2 text-[10px] text-gray-600">
+        <div>
+          <span className="text-gray-500">API:</span> {order.selectedAPI || "N/A"}
+        </div>
+        <div>
+          <span className="text-gray-500">Bundle:</span> {order.selectedBundle || "N/A"}
+        </div>
+        <div>
+          <span className="text-gray-500">Pattern:</span> {order.patternName || order.patternType}
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="mt-4 flex items-center gap-2 flex-wrap">
+        {!isCancelled && status === "running" && (
+          <button
+            onClick={() => onControl(order, "pause")}
+            disabled={controlBusy}
+            className="flex items-center gap-1 rounded-md border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-300 hover:bg-orange-500/20 transition disabled:opacity-50"
+          >
+            {controlBusy ? "⏳" : "⏸️"} Pause
+          </button>
+        )}
+
+        {!isCancelled && status === "paused" && (
+          <button
+            onClick={() => onControl(order, "resume")}
+            disabled={controlBusy}
+            className="flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 transition disabled:opacity-50"
+          >
+            {controlBusy ? "⏳" : "▶️"} Resume
+          </button>
+        )}
+
+        {!isCancelled && status !== "completed" && (
+          <button
+            onClick={() => {
+              if (window.confirm("Cancel this mission?")) {
+                onControl(order, "cancel");
+              }
+            }}
+            disabled={controlBusy}
+            className="flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 transition disabled:opacity-50"
+          >
+            {controlBusy ? "⏳" : "❌"} Cancel
+          </button>
+        )}
+
         <button
-          type="button"
-          disabled={controlBusy || effectiveStatus !== "running"}
-          onClick={() => handleControl("pause")}
-          className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Pause
-        </button>
-        <button
-          type="button"
-          disabled={controlBusy || effectiveStatus !== "paused"}
-          onClick={() => handleControl("resume")}
-          className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Resume
-        </button>
-        <button
-          type="button"
-          disabled={controlBusy || effectiveStatus === "cancelled" || effectiveStatus === "completed"}
-          onClick={() => handleControl("cancel")}
-          className="rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs text-red-300 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
           onClick={() => onClone(order)}
-          className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-3 py-1.5 text-xs text-yellow-300 transition hover:bg-yellow-500/20"
+          className="flex items-center gap-1 rounded-md border border-gray-600 bg-black px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:border-gray-500 transition"
         >
-          Clone
+          📋 Clone
         </button>
-        <button
-          type="button"
-          onClick={() => setExpanded((prev) => !prev)}
-          className="ml-auto text-sm text-yellow-400 hover:text-yellow-300"
+
+        <a
+          href={order.link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 rounded-md border border-gray-600 bg-black px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:border-gray-500 transition"
         >
-          {expanded ? "Hide Runs" : "View Runs"}
+          🔗 Open
+        </a>
+
+        <button
+          onClick={() => setShowRuns(!showRuns)}
+          className={`flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium transition ml-auto ${
+            showRuns
+              ? "border-yellow-500/50 bg-yellow-500/20 text-yellow-300"
+              : "border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
+          }`}
+        >
+          {showRuns ? "🔼 Hide Runs" : `📋 View Runs (${safeRuns.length})`}
         </button>
       </div>
 
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
-            <RunTable 
-              runs={safeRuns} 
-              runStatuses={safeRunStatuses} 
-              runErrors={safeRunErrors}
-              runRetries={order.runRetries || []}
-              runOriginalTimes={order.runOriginalTimes || []}
-              runCurrentTimes={order.runCurrentTimes || []}
-              runReasons={order.runReasons || []}
-              mode="logs" 
-            />
+      {/* Run Table */}
+      <AnimatePresence>
+        {showRuns && safeRuns.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-4 overflow-hidden"
+          >
+            <div className="rounded-lg border border-yellow-500/20 bg-black/50 p-3">
+              <RunTable
+                runs={safeRuns}
+                runStatuses={safeRunStatuses}
+                runErrors={safeRunErrors}
+                runRetries={order.runRetries || []}
+                runOriginalTimes={order.runOriginalTimes || []}
+                runCurrentTimes={order.runCurrentTimes || []}
+                runReasons={order.runReasons || []}
+                mode="logs"
+              />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </article>
+
+      {/* Timestamps */}
+      <div className="mt-3 flex items-center justify-between text-[10px] text-gray-700">
+        <span>Created: {new Date(order.createdAt).toLocaleString()}</span>
+        {order.lastUpdatedAt && (
+          <span>Updated: {new Date(order.lastUpdatedAt).toLocaleString()}</span>
+        )}
+      </div>
+    </div>
   );
 }
