@@ -972,7 +972,7 @@ const commentsRuns = (safePlan?.runs || []).map((run) => {
               }
             }
                         if (includeSaves) {
-              const filteredSavesRuns = savesRuns.filter(r => r.quantity > 0);
+             const filteredSavesRuns = savesRuns.filter(r => r.quantity >= 10);
               if (filteredSavesRuns.length > 0) {
                 servicesPayload.saves = { serviceId: savesServiceId, runs: filteredSavesRuns };
               }
