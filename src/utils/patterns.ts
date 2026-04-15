@@ -1455,7 +1455,7 @@ if (config.includeComments) {
   : viewRuns.map(() => 0);
 
     const savesBase = config.includeSaves
-  ? distributeByViewsProportional(provisionalRuns, savesTotal, 1)
+  ? distributeByViewsProportional(provisionalRuns, savesTotal, 10)
   : viewRuns.map(() => 0);
   const commentsBase = config.includeComments
   ? distributeByViewsProportional(provisionalRuns, commentsTotal, 1)
@@ -1463,11 +1463,11 @@ if (config.includeComments) {
 
   const likesRuns = likesBase;
   const sharesRuns = normalizeSharesRuns(sharesBase, 20);
-    const savesRuns = clearFirstRun(
+      const savesRuns = clearFirstRun(
     savesBase.map(v => {
       if (v <= 0) return 0;
-      // 🔥 FIX: Reduced variation from 40% to 10% max to prevent over-ordering
-      const variation = Math.floor(v * (Math.random() * 0.1)); // up to +10% only
+      if (v < 10) return 10; // 🔥 FIX: enforce minimum 10
+      const variation = Math.floor(v * (Math.random() * 0.1));
       return v + variation;
     })
   );
