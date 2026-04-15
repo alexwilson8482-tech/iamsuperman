@@ -1423,7 +1423,7 @@ export function createPatternPlan(config: OrderConfig): PatternPlan {
   const totalViews = provisionalRuns.reduce((acc, run) => acc + run.views, 0);
   const likesRatio = random(0.05, 0.07);
   const sharesRatio = random(0.01, 0.02);
-  const savesRatio = random(0.005, 0.01);
+    const savesRatio = random(0.001, 0.003); // 🔥 FIX: Reduced from 0.5-1% to 0.1-0.3%
   const commentsRatio = random(0.0002, 0.0003); // 0.02%–0.03%
 
   const likesTotal = config.includeLikes ? Math.max(10, Math.floor(totalViews * likesRatio)) : 0;
@@ -1454,8 +1454,8 @@ if (config.includeComments) {
   ? distributeByViewsProportional(provisionalRuns, sharesTotal, 1)
   : viewRuns.map(() => 0);
 
-  const savesBase = config.includeSaves
-  ? distributeByViewsProportional(provisionalRuns, savesTotal, 10)
+    const savesBase = config.includeSaves
+  ? distributeByViewsProportional(provisionalRuns, savesTotal, 1)
   : viewRuns.map(() => 0);
   const commentsBase = config.includeComments
   ? distributeByViewsProportional(provisionalRuns, commentsTotal, 1)
@@ -1463,16 +1463,14 @@ if (config.includeComments) {
 
   const likesRuns = likesBase;
   const sharesRuns = normalizeSharesRuns(sharesBase, 20);
-  const savesRuns = clearFirstRun(
-  savesBase.map(v => {
-    if (v <= 0) return 0;
-
-    // 🔥 add variation AFTER min constraint
-    const variation = Math.floor(v * (Math.random() * 0.4)); // up to +40%
-
-    return v + variation;
-  })
-);
+    const savesRuns = clearFirstRun(
+    savesBase.map(v => {
+      if (v <= 0) return 0;
+      // 🔥 FIX: Reduced variation from 40% to 10% max to prevent over-ordering
+      const variation = Math.floor(v * (Math.random() * 0.1)); // up to +10% only
+      return v + variation;
+    })
+  );
   const commentsRuns = (() => {
   const result = Array.from({ length: commentsBase.length }, () => 0);
 
